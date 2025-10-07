@@ -1,0 +1,701 @@
+# Load environment variables from config file
+readRenviron("config.env")
+
+# Retrieve project directory from environment
+projectdir <- Sys.getenv("MRPregdir")
+print(projectdir)
+
+# Use `projectdir` to navigate folders without hardcoding paths
+setwd(paste0(projectdir, "/MR_PREG_files_for_github/"))
+getwd()
+
+# Return to main project directory
+setwd(projectdir)
+getwd()
+
+#Downloading exposure data
+exp_dat <- read.csv("exposures_for_inflammation_analysis.csv")
+#Downloading outcome data
+setwd("//rdsfcifs.acrc.bris.ac.uk/MRC-IEU-research/projects/ieu3/p5/018/working/data")
+library(data.table)
+ma <- fread("ma_out_dat.txt")
+#Load necessary packages 
+pkgs <- c("MRInstruments", "TwoSampleMR", "tidyverse", "dplyr", "ggpubr", "ggplot2", "ggforce", "data.table", "ggforestplot","gtools", "LDlinkR", "simex", "ieugwasr", "openxlsx", "stringi", "purrr")
+lapply(pkgs,library,character.only = TRUE)
+setwd("//rdsfcifs.acrc.bris.ac.uk/MRC-IEU-research/projects/ieu3/p5/018/working")
+###Get outcome information
+out_info <- read.csv("scripts/MR/outcome_info.csv") %>%
+filter(eligible == "yes") %>%
+select(Outcome:order)
+out_func <- function(study_name)
+{
+# Extract outcome SNPs matching the SNPs in the exposure dataset
+outcome_data <- outcome_variables %>%
+filter(., study==study_name) %>%
+mutate("id" = paste(study, Phenotype, sep = "_")) %>%
+data.frame()
+outcome_data <- format_data(outcome_data, snps = exp_dat$SNP, type = "outcome")
+return(outcome_data)
+}
+outcome_variables <- ma %>% filter(., !(het_pval<0.05))
+rm(ma)
+out_dat <- out_func("Metanalysis") %>%
+filter(outcome %in% out_info$Variable_name)
+length(unique(out_dat$outcome))
+n_out <- out_dat %>%
+group_by(outcome) %>%
+summarise(
+Ncase_min = min(ncase.outcome),
+N_min = min(samplesize.outcome),
+Ncase_median = median(ncase.outcome),
+N_median = median(samplesize.outcome),
+Ncase_max = max(ncase.outcome),
+N_max = max(samplesize.outcome)
+) %>%
+ungroup %>%
+merge(., out_info, by.x = "outcome", by.y = "Variable_name") %>%
+arrange(priority, group, order)
+n_out
+#Download proxy SNPs
+crp_nicu_missing_proxies <- read.csv("crp_nicu_missing_proxies.csv")
+glyCA_IRNT_em_cs_missing_proxies <- read.csv("glyCA_IRNT_em_cs_missing_proxies.csv")
+glyCA_em_cs_missing_proxies <- read.csv("glyCA_em_cs_missing_proxies.csv")
+IL6R_nicu_missing_proxies <- read.csv("IL6R_nicu_missing_proxies.csv")
+IL6R_sga_missing_proxies <- read.csv("IL6R_sga_missing_proxies.csv")
+IL6_sen_proxies <- read.csv("IL6_sen_proxies.csv")
+#Preparing proxy SNPs
+All_proxy_dat <- rbind(crp_nicu_missing_proxies,glyCA_em_cs_missing_proxies,glyCA_IRNT_em_cs_missing_proxies,IL6R_nicu_missing_proxies,IL6R_sga_missing_proxies,IL6_sen_proxies)
+All_proxy_dat <- All_proxy_dat[!(All_proxy_dat$rsid %in% exp_dat$SNP),]
+out_func2 <- function(study_name)
+{
+# Extract outcome SNPs matching the SNPs in the exposure dataset
+outcome_data <- outcome_variables %>%
+filter(., study==study_name) %>%
+mutate("id" = paste(study, Phenotype, sep = "_")) %>%
+data.frame()
+outcome_data <- format_data(outcome_data, snps = All_proxy_dat$rsid, type = "outcome")
+return(outcome_data)
+}
+out_dat_proxies <- out_func2("Metanalysis") %>%
+filter(outcome %in% out_info$Variable_name)
+test <- All_proxy_dat
+test <- test %>% rename(SNP = rsid)
+out_dat_proxies <- left_join(out_dat_proxies,test, by = "SNP")
+out_dat_proxies <- out_dat_proxies[,c(1:16)]
+#Proxy merging function
+generate_outdat_with_proxies <- function(exposure_dat, outcome_dat, outcome_name,
+proxies){
+### Set up
+i_outcome <- outcome_name
+# Filter specific outcome dataset to available exposure SNPs
+tmp_outcome_dat <- outcome_dat %>%
+filter(SNP %in% exposure_dat$SNP, outcome == i_outcome)
+### Remove any duplicated SNPs
+tmp_outcome_dat <- tmp_outcome_dat[!duplicated(tmp_outcome_dat$SNP), ]
+### Check whether outcome is available
+if(dim(tmp_outcome_dat)[1] == 0){
+print(paste("Outcome", outcome_name, "not available"))
+# Return data with 0 rows if outcome was not available
+tmp_outcome_dat
+### Check whether proxies needed
+} else if (dim(tmp_outcome_dat)[1] == dim(exposure_dat)[1]){
+print(paste("No proxies needed for", outcome_name))
+# Return full outcome dataset if no proxies needed
+tmp_outcome_dat
+} else {
+### Identify proxies
+# Specify all available SNPs
+outcome_snps <- expand.grid(
+SNP = c(exposure_dat$SNP), outcome = unique(outcome_dat$outcome))
+# Left join outcome_dat, NAs if missing
+outcome_snps_available <-
+left_join(outcome_snps, outcome_dat, by = c("SNP", "outcome")) %>%
+# Add indicator column for NAs
+mutate(missing = ifelse(is.na(effect_allele.outcome),
+TRUE, FALSE))
+# Deduplicated list of all SNPs which we need a proxy for
+need_proxies <- outcome_snps_available %>%
+filter(missing == TRUE) %>%
+distinct(SNP)
+# Count of proxies needed by outcome
+table(outcome_snps_available$outcome[outcome_snps_available$missing == TRUE])
+# List of all proxies
+proxy_snps <- unique(proxies$rsid)
+# Proxies without query SNPs
+proxies_merge_diff <- subset(proxies, query_rsid!=rsid)
+proxies_merge_diff$SNP<-proxies_merge_diff$rsid
+outcome_dat_proxies_tmp <-subset(outcome_dat,
+outcome_dat$outcome== i_outcome)
+# All SNPs we need to proxy for this outcome
+outcome_snps_tmp <- subset(outcome_snps, outcome_snps$outcome==i_outcome)
+# Available SNPs in outcome data:
+outcome_snps_available <-
+left_join(outcome_snps_tmp, outcome_dat, by = c("SNP", "outcome")) %>%
+# Add indicator column for NAs
+mutate(missing = ifelse(is.na(effect_allele.outcome),
+TRUE, FALSE))
+# SNPs not available for our outcome in outcome data, for which we need proxies:
+need_proxies <- outcome_snps_available %>%
+filter(missing == TRUE) %>%
+distinct(SNP)
+if(dim(need_proxies)[1] > 0){
+print(paste0("Searching for proxies for ", dim(need_proxies)[1], " SNPs."))
+# Append proxies information -
+# For every SNP needing a proxy ('SNP'),
+# create row with information about the proxy ('rsid' & 'SNP.y' columns)
+tmp1 <- merge(x=need_proxies, y=proxies_merge_diff, by.x="SNP", by.y="query_rsid", all.x=TRUE)
+# For each proxy SNP ('rsid'), append the extracted proxy-outcome GWAS data
+tmp2 <-merge(x=tmp1, y=outcome_dat_proxies_tmp, by.x="rsid", by.y="SNP", all.y=TRUE)
+# this leaves NAs where any proxy SNPs could not be extracted
+# since they were not available in outcome data
+# Exclude palindromic proxies:
+tmp2 <-subset(tmp2, !(effect_allele.outcome == "A" & other_allele.outcome == "T" |
+effect_allele.outcome == "T" & other_allele.outcome == "A") )
+tmp2 <-subset(tmp2, !(effect_allele.outcome == "C" & other_allele.outcome == "G" |
+effect_allele.outcome == "G" & other_allele.outcome == "C") )
+# Select the proxy SNP ('rsid') in highest LD with the query SNP ('SNP') needing a proxy -
+set.seed(67898) # to ensure slice_sample() is reproducible
+tmp3 <- tmp2 %>%
+group_by(SNP) %>%
+# Remove any proxies with missing outcome data
+drop_na() %>%
+# Select max R2 value, keep ties if several have same R2
+slice_max(R2, with_ties = TRUE) %>%
+# Select random proxy SNP if several have same R2
+slice_sample(n = 1)
+}
+# Stop searching for proxies if no SNP-outcome data available
+if( (dim(need_proxies)[1] > 0) & (dim(tmp3)[1] == 0) ){
+print("No proxy-outcome associations available for any SNPs.")
+} else {
+# Add column specifying proxy effect allele
+# checking proxy outcome data and using original SNP alleles
+# using query SNP alleles but checking they're the right way round using proxy outcome data
+#'Correlated alleles' format:
+# query effect allele = proxy effect allele, query other allele = proxy other allele
+tmp4 <- tmp3
+tmp4$effect_allele.proxy <- apply(tmp4, 1, function(row) {
+# If outcome effect allele same as proxy effect allele, treat as if using query effect allele -
+if (row["effect_allele.outcome"] == substr(row["Correlated_Alleles"], 3, 3)) {
+return(substr(row["Correlated_Alleles"], 1, 1))
+# if outcome effect allele same as proxy other allele, treat as if using query other allele -
+} else if (row["effect_allele.outcome"] == substr(row["Correlated_Alleles"], 7, 7)) {
+return(substr(row["Correlated_Alleles"], 5, 5))
+} else {
+return("default_value")
+}
+})
+# Same again but for other allele -
+tmp4$other_allele.proxy <- apply(tmp4, 1, function(row) {
+if (row["other_allele.outcome"] == substr(row["Correlated_Alleles"], 3, 3)) {
+return(substr(row["Correlated_Alleles"], 1, 1))
+} else if (row["other_allele.outcome"] == substr(row["Correlated_Alleles"], 7, 7)) {
+return(substr(row["Correlated_Alleles"], 5, 5))
+} else {
+return("default_value")
+}
+})
+# Treat proxy alleles as the outcome alleles
+tmp5 <- tmp4
+tmp5$effect_allele.outcome<-tmp5$effect_allele.proxy
+tmp5$other_allele.outcome<-tmp5$other_allele.proxy
+tmp5$data_source.outcome <- NA
+# Create final dataframe which has replaced missing SNPs with their proxies
+outcome_dat_cols <- colnames(outcome_dat)
+tmp5 <- tmp5 %>% select(all_of(outcome_dat_cols))
+# Return message with number of SNPs which could be proxied
+print(paste0(dim(tmp5)[1], " proxies identified."))
+tmp_outcome_dat <- rbind(tmp_outcome_dat, tmp5)
+}
+}
+# Return full outcome dataset with added proxies
+tmp_outcome_dat
+}
+#Make outcome variable with true SNPs and proxies
+out_dat_total <- rbind(out_dat,out_dat_proxies)
+#Find the proxy associations!
+all_outcomes <- list()
+for (i in unique(out_dat$outcome)){
+x <- generate_outdat_with_proxies(exposure_dat = exp_dat,outcome_dat = out_dat_total,outcome_name = i,proxies = All_proxy_dat)
+all_outcomes[[paste0(i)]] <- x
+}
+outcomes_dat <- bind_rows(all_outcomes)
+#Perform regular MR analysis
+dat2 <- harmonise_data(exposure_dat = exp_dat,outcome_dat = outcomes_dat)
+dat2$id.exposure <- ifelse(dat2$exposure == "IL6R-WDT","ebi-a-GCST90012025-WDT",dat2$id.exposure)
+results <- mr(dat2, method_list = c("mr_ivw", "mr_egger_regression",
+"mr_weighted_median", "mr_weighted_mode"))
+results1 <- rename(results, out_var = outcome) %>%
+merge(., out_info, by.x = "out_var", by.y = "Variable_name")
+dat3 <- rename(dat2, out_var = outcome) %>%
+merge(., out_info, by.x = "out_var", by.y = "Variable_name")
+p1 <- mr_scatter_plot(results1, dat3)
+plt <- mr_pleiotropy_test(dat2) %>%
+merge(., out_info, by.x = "outcome", by.y = "Variable_name")
+het <- mr_heterogeneity(dat2) %>%
+merge(., out_info, by.x = "outcome", by.y = "Variable_name")
+#Doing SD transformed analysis
+exp_dat2 <- exp_dat
+exp_dat2$beta.exposure[exp_dat2$id.exposure == "ebi-a-GCST90029070"] <- exp_dat2$beta.exposure[exp_dat2$id.exposure == "ebi-a-GCST90029070"]/1.73
+exp_dat2$se.exposure[exp_dat2$id.exposure == "ebi-a-GCST90029070"] <- exp_dat2$se.exposure[exp_dat2$id.exposure == "ebi-a-GCST90029070"]/1.73
+exp_dat2$beta.exposure[exp_dat2$id.exposure == "IL6"] <- exp_dat2$beta.exposure[exp_dat2$id.exposure == "IL6"]/3.16
+exp_dat2$se.exposure[exp_dat2$id.exposure == "IL6"] <- exp_dat2$se.exposure[exp_dat2$id.exposure == "IL6"]/3.16
+exp_dat2$beta.exposure[exp_dat2$id.exposure == "GlycA"] <- exp_dat2$beta.exposure[exp_dat2$id.exposure == "GlycA"]/0.12
+exp_dat2$se.exposure[exp_dat2$id.exposure == "GlycA"] <- exp_dat2$se.exposure[exp_dat2$id.exposure == "GlycA"]/0.12
+exp_dat2$id.exposure <- ifelse(exp_dat2$exposure == "IL6R-WDT","ebi-a-GCST90012025-WDT",exp_dat2$id.exposure)
+dat4 <- harmonise_data(
+exposure_dat = exp_dat2,
+outcome_dat = outcomes_dat)
+results2 <- mr(dat4, method_list = c("mr_ivw", "mr_egger_regression",
+"mr_weighted_median", "mr_weighted_mode"))
+results3 <- rename(results, out_var = outcome) %>%
+merge(., out_info, by.x = "out_var", by.y = "Variable_name")
+dat5 <- rename(dat4, out_var = outcome) %>%
+merge(., out_info, by.x = "out_var", by.y = "Variable_name")
+p2 <- mr_scatter_plot(results3, dat5)
+plt2 <- mr_pleiotropy_test(dat4) %>%
+merge(., out_info, by.x = "outcome", by.y = "Variable_name")
+het2 <- mr_heterogeneity(dat4) %>%
+merge(., out_info, by.x = "outcome", by.y = "Variable_name")
+#Making forest plots
+#With original units
+prep_func <- function(results_file) {
+#rename outcomes
+results_file <- rename(results_file, out_var = outcome) %>%
+merge(., out_info, by.x = "out_var", by.y = "Variable_name")
+#reorder methods
+as.factor(results_file$method)
+results_file$method <- factor(results_file$method, levels = c("Weighted mode", "Weighted median",
+"MR Egger", "Inverse variance weighted"))
+#reorder outcome group
+as.factor(results_file$group)
+results_file$group <- factor(results_file$group, levels = c("Pregnancy loss outcomes", "Maternal morbidity outcomes", "Labour outcomes",
+"Offspring birth outcomes", "Continuous outcomes"))
+# harmonise exposure names
+results_file <- mutate(results_file, id.exposure = case_when(
+id.exposure == "ebi-a-GCST90012005" ~ "IL6 (sensitivity)",
+id.exposure == "ebi-a-GCST90012025" ~ "IL6-R",
+id.exposure == "ebi-a-GCST90012025-WDT" ~ "IL6-R (alternative)",
+id.exposure == "ebi-a-GCST90029070" ~ "CRP (Said et al)",
+id.exposure == "IL6" ~ "IL6 (Ahluwalia et al)",
+id.exposure == "GlycA" ~ "GlycA (UKB)",
+.default = id.exposure
+))
+return(results_file)
+}
+results_for_forest_plots <- prep_func(results)
+subset_df <- function(df, exp, meth = "Inverse variance weighted",
+stu = "Metanalysis",  typ = "binary", pri = "primary") {
+df <- filter(df,
+id.exposure == exp,
+method %in% meth,
+study == stu,
+type == typ,
+priority == pri
+)
+}
+multiple_testing_func <- function(results_file){
+results_with_MT <- results_file %>%
+mutate(
+p.fdr = p.adjust(pval, method = "fdr"),
+p.fdr.sig = ifelse(p.fdr < .05, "*", "")
+) %>%
+return(results_with_MT)
+}
+myforestplot <- function(dt, log_T = TRUE, exp_type, limits, effect = "Odds ratio", one_colour = T) {
+if("p.fdr" %in% names(dt)) {
+dt <- mutate(dt, p_val = p.fdr)
+} else {
+dt <- mutate(dt, p_val = pval)
+}
+dt <- arrange(dt, order)
+xlabel <- paste(effect, "(95% CI) per unit higher", exp_type)
+if(one_colour == T) {
+p <- dt %>%
+forestplot(
+estimate = b,
+se = se,
+pvalue = p_val,
+name = Outcome,
+logodds = log_T,
+psignif = 0.05,
+colour = NULL,
+xlab = xlabel,
+xlim = limits
+)
+} else {
+p <- dt %>%
+forestplot(
+estimate = b,
+se = se,
+pvalue = p_val,
+name = Outcome,
+logodds = log_T,
+psignif = 1,
+colour = var_colour,
+xlab = xlabel,
+xlim = limits
+) +
+theme(legend.title = element_blank())
+}
+p <- p +
+theme(axis.title.x = element_text(color="black", size=10, face="bold")) +
+ggforce::facet_col(
+facets = ~group,
+scales = "free_y",
+space = "free"
+)
+return(p)
+}
+myforestplot3 <- function(dt, log_T = TRUE, exp_type, limits, effect = "Odds ratio", one_colour = T) {
+if("p.fdr" %in% names(dt)) {
+dt <- mutate(dt, p_val = p.fdr)
+} else {
+dt <- mutate(dt, p_val = pval)
+}
+dt <- arrange(dt, order)
+xlabel <- paste(effect, "(95% CI) per unit higher", exp_type)
+if(one_colour == T) {
+p <- dt %>%
+forestplot(
+estimate = b,
+se = se,
+pvalue = p_val,
+name = Outcome,
+logodds = log_T,
+psignif = 1,
+colour = "constant",
+xlab = xlabel,
+xlim = limits
+)+scale_colour_manual(values = c("constant" = "#8F87FF"))+guides(colour = "none")
+} else {
+p <- dt %>%
+forestplot(
+estimate = b,
+se = se,
+pvalue = p_val,
+name = Outcome,
+logodds = log_T,
+psignif = 1,
+colour = var_colour,
+xlab = xlabel,
+xlim = limits
+) +
+theme(legend.title = element_blank())
+}
+p <- p +
+theme(axis.title.x = element_text(color="black", size=10, face="bold")) +
+ggforce::facet_col(
+facets = ~group,
+scales = "free_y",
+space = "free"
+)
+return(p)
+}
+arrange_func <- function(A, B, C, D){
+plot.new()
+par(mar=c(1,1,1,1), mgp=c(3,1,0))
+x <- ggarrange(A, B, C, D, labels=c('A', 'B', 'C', 'D'),
+ncol = 2, nrow = 2, common.legend = T, hjust = -3, legend = "bottom")
+print(x)
+}
+save_func <- function(file_name, plot_name, height)
+{
+png(file_name, res=330, height=height, width=7500)
+print(plot_name)
+dev.off()
+}
+results_for_forest_plots <- results_for_forest_plots %>% mutate(study = str_extract(id.outcome, "[^_]+"), exposure = tolower(exposure))
+IL6_sens_MA <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6 (sensitivity)") %>%
+multiple_testing_func %>%
+myforestplot(dt = ., exp_type = "IL6", limits= c(0.7,1.5))
+IL6_sens_MA
+IL6_MA <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6 (Ahluwalia et al)") %>%
+multiple_testing_func %>%
+myforestplot(dt = ., exp_type = "IL6", limits= c(0.7,1.5))
+IL6_MA
+GlycA_MA <- results_for_forest_plots %>%
+subset_df(df = ., exp = "GlycA (UKB)") %>%
+multiple_testing_func %>%
+myforestplot(dt = ., exp_type = "GlycA", limits= c(0.0875,11.2))
+GlycA_MA
+CRP_MA <- results_fp %>%
+subset_df(df = ., exp = "CRP (Said et al)") %>%
+multiple_testing_func %>%
+myforestplot(dt = ., exp_type = "CRP", limits= c(0.7,1.5))
+CRP_MA <- results_for_forest_plots %>%
+subset_df(df = ., exp = "CRP (Said et al)") %>%
+multiple_testing_func %>%
+myforestplot(dt = ., exp_type = "CRP", limits= c(0.7,1.5))
+CRP_MA
+IL6R_MA <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6-R") %>%
+multiple_testing_func %>%
+myforestplot(dt = ., exp_type = "IL6R", limits= c(0.7,1.5))
+IL6R_MA
+IL6R_alt_MA <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6-R (alternative)") %>%
+multiple_testing_func %>%
+myforestplot(dt = ., exp_type = "IL6R", limits= c(0.7,1.5))
+IL6R_alt_MA
+ALL_MA <- arrange_func(GlycA_MA, CRP_MA, IL6_MA, IL6R_MA)
+ALL_MA
+save_func('MA_IVW_primout_option2.png', ALL_MA, 6500)
+IL6_sens_MA_sec <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6 (sensitivity)", pri = "secondary") %>%
+myforestplot(dt = ., exp_type = "IL6", limits= c(0.7,1.5))
+IL6_sens_MA_sec
+IL6_MA_sec <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6 (Ahluwalia et al)", pri = "secondary") %>%
+myforestplot(dt = ., exp_type = "IL6", limits= c(0.7,1.5))
+IL6_MA_sec
+GlycA_MA_sec <- results_for_forest_plots %>%
+subset_df(df = ., exp = "GlycA (UKB)", pri = "secondary") %>%
+myforestplot(dt = ., exp_type = "GlycA", limits= c(0.0875,11.2))
+GlycA_MA_sec
+CRP_MA_sec <- results_for_forest_plots %>%
+subset_df(df = ., exp = "CRP (Said et al)", pri = "secondary") %>%
+myforestplot(dt = ., exp_type = "CRP", limits= c(0.7,1.5))
+CRP_MA_sec
+IL6R_MA_sec <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6-R", pri = "secondary") %>%
+myforestplot(dt = ., exp_type = "IL6R", limits= c(0.7,1.5))
+IL6R_MA_sec
+IL6R_alt_MA_sec <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6-R (alternative)", pri = "secondary") %>%
+myforestplot(dt = ., exp_type = "IL6R", limits= c(0.7,1.5))
+IL6R_alt_MA_sec
+ALL_MA_sec <- arrange_func(GlycA_MA_sec, CRP_MA_sec, IL6_MA_sec, IL6R_MA_sec)
+save_func('MA_IVW_secout_option2.png', ALL_MA_sec, 6500)
+IL6_sens_MA_c <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6 (sensitivity)", typ = "continuous", pri = "secondary") %>%
+myforestplot(dt = ., log_T = F, exp_type = "IL6", limits= c(-0.3,0.1), effect = "Mean change")
+IL6_sens_MA_c
+IL6_MA_c <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6 (Ahluwalia et al)", typ = "continuous", pri = "secondary") %>%
+myforestplot(dt = ., log_T = F, exp_type = "IL6", limits= c(-0.4,0.2), effect = "Mean change")
+IL6_MA_c
+GlycA_MA_c <- results_for_forest_plots %>%
+subset_df(df = ., exp = "GlycA (UKB)", typ = "continuous", pri = "secondary") %>%
+myforestplot(dt = ., log_T = F, exp_type = "GlycA", limits= c(-0.7,0.3), effect = "Mean change")
+GlycA_MA_c
+CRP_MA_c <- results_for_forest_plots %>%
+subset_df(df = ., exp = "CRP (Said et al)", typ = "continuous", pri = "secondary") %>%
+myforestplot(dt = ., log_T = F, exp_type = "CRP", limits= c(-0.3,0.1), effect = "Mean change")
+CRP_MA_c
+IL6R_MA_c <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6-R", typ = "continuous", pri = "secondary") %>%
+myforestplot(dt = ., log_T = F, exp_type = "IL6R", limits= c(-0.3,0.1), effect = "Mean change")
+IL6R_MA_c
+IL6R_alt_MA_c <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6-R (alternative)", typ = "continuous", pri = "secondary") %>%
+myforestplot(dt = ., log_T = F, exp_type = "IL6R", limits= c(-0.3,0.1), effect = "Mean change")
+IL6R_alt_MA_c
+ALL_MA_sec_c <- arrange_func(GlycA_MA_c, CRP_MA_c, IL6_MA_c, IL6R_MA_c)
+save_func('MA_IVW_contout_option2.png', ALL_MA_sec_c, 6500)
+GlycA_methods <- results_for_forest_plots %>%
+subset_df(df = ., exp = "GlycA (UKB)", meth = c(unique(.$method))) %>%
+mutate(var_colour = method) %>%
+myforestplot(dt = ., exp_type = "GlycA", limits= c(0.5,3.5), one_colour = F)
+GlycA_methods
+GlycA_methods <- results_for_forest_plots %>%
+subset_df(df = ., exp = "GlycA (UKB)", meth = c(unique(.$method))) %>%
+mutate(var_colour = method) %>%
+myforestplot(dt = ., exp_type = "GlycA", limits= c(0.0875,11.2), one_colour = F)
+GlycA_methods
+CRP_methods <- results_for_forest_plots %>%
+subset_df(df = ., exp = "CRP (Said et al)", meth = c(unique(.$method))) %>%
+mutate(var_colour = method) %>%
+myforestplot(dt = ., exp_type = "CRP", limits= c(0.5,3.5), one_colour = F)
+CRP_methods
+IL6_methods <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6 (Ahluwalia et al)", meth = c(unique(.$method))) %>%
+mutate(var_colour = method) %>%
+myforestplot(dt = ., exp_type = "IL6", limits= c(0.5,3.5), one_colour = F)
+IL6_methods
+IL6_methods <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6 (Ahluwalia et al)", meth = c(unique(.$method))) %>%
+myforestplot3(dt = ., exp_type = "IL6", limits= c(0.5,3.5), one_colour = T)
+IL6_methods
+IL6_sens_methods <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6 (sensitivity)", meth = c(unique(.$method))) %>%
+myforestplot3(dt = ., exp_type = "IL6", limits= c(0.5,3.5), one_colour = T)
+IL6_sens_methods
+IL6R_methods <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6-R", meth = c(unique(.$method))) %>%
+mutate(var_colour = method) %>%
+myforestplot(dt = ., exp_type = "IL6R", limits= c(0.5,3.5), one_colour = F)
+IL6R_methods
+IL6R_alt_methods <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6-R (alternative)", meth = c(unique(.$method))) %>%
+mutate(var_colour = method) %>%
+myforestplot(dt = ., exp_type = "IL6R", limits= c(0.5,3.5), one_colour = F)
+IL6R_alt_methods
+all_methods <- arrange_func(GlycA_methods, CRP_methods, IL6_methods, IL6R_methods)
+save_func('all_MA_methods_primout2.png', all_methods, 6500)
+GlycA_methods_sec <- results_for_forest_plots %>%
+subset_df(df = ., exp = "GlycA (UKB)", pri = "secondary", meth = c(unique(.$method))) %>%
+mutate(var_colour = method) %>%
+myforestplot(dt = ., exp_type = "GlycA", limits= c(0.0875,11.2), one_colour = F)
+GlycA_methods_sec
+CRP_methods_sec <- results_for_forest_plots %>%
+subset_df(df = ., exp = "CRP (Said et al)", pri = "secondary", meth = c(unique(.$method))) %>%
+mutate(var_colour = method) %>%
+myforestplot(dt = ., exp_type = "CRP", limits= c(0.5,3.5), one_colour = F)
+CRP_methods_sec
+IL6_methods_sec <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6 (Ahluwalia et al)", pri = "secondary", meth = c(unique(.$method))) %>%
+myforestplot3(dt = ., exp_type = "IL6", limits= c(0.5,3.5), one_colour = T)
+IL6_methods_sec
+IL6_sens_methods_sec <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6 (sensitivity)", pri = "secondary", meth = c(unique(.$method))) %>%
+myforestplot3(dt = ., exp_type = "IL6", limits= c(0.5,3.5), one_colour = T)
+IL6_sens_methods_sec
+IL6R_methods_sec <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6-R", pri = "secondary", meth = c(unique(.$method))) %>%
+mutate(var_colour = method) %>%
+myforestplot(dt = ., exp_type = "IL6R", limits= c(0.5,3.5), one_colour = F)
+IL6R_methods_sec
+IL6R_alt_methods_sec <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6-R (alternative)", pri = "secondary", meth = c(unique(.$method))) %>%
+mutate(var_colour = method) %>%
+myforestplot(dt = ., exp_type = "IL6R", limits= c(0.5,3.5), one_colour = F)
+IL6R_alt_methods_sec
+all_methods_sec <- arrange_func(GlycA_methods_sec, CRP_methods_sec, IL6_methods_sec, IL6R_methods_sec)
+save_func('all_MA_methods_secout2.png', all_methods_sec, 6500)
+GlycA_methods_c <- results_for_forest_plots %>%
+subset_df(df = ., exp = "GlycA (UKB)", typ = "continuous", pri = "secondary", meth = c(unique(.$method))) %>%
+mutate(var_colour = method) %>%
+myforestplot(dt = ., log_T = F, exp_type = "GlycA", limits = c(-0.8,0.8), one_colour = F, effect = "Mean change")
+GlycA_methods_c
+CRP_methods_c <- results_for_forest_plots %>%
+subset_df(df = ., exp = "CRP (Said et al)", typ = "continuous", pri = "secondary", meth = c(unique(.$method))) %>%
+mutate(var_colour = method) %>%
+myforestplot(dt = ., log_T = F, exp_type = "CRP", limits = c(-0.3,0.1), one_colour = F, effect = "Mean change")
+CRP_methods_c
+IL6_sens_methods_c <- results_fp %>%
+subset_df(df = ., exp = "IL6 (sensitivity)", typ = "continuous", pri = "secondary", meth = c(unique(.$method))) %>%
+myforestplot3(dt = ., log_T = F, exp_type = "IL6", limits = c(-0.3,0.1), one_colour = T, effect = "Mean change")
+IL6_sens_methods_c <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6 (sensitivity)", typ = "continuous", pri = "secondary", meth = c(unique(.$method))) %>%
+myforestplot3(dt = ., log_T = F, exp_type = "IL6", limits = c(-0.3,0.1), one_colour = T, effect = "Mean change")
+IL6_sens_methods_c
+IL6_methods_c <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6 (Ahluwalia et al)", typ = "continuous", pri = "secondary", meth = c(unique(.$method))) %>%
+myforestplot3(dt = ., log_T = F, exp_type = "IL6", limits = c(-0.4,0.2), one_colour = T, effect = "Mean change")
+IL6_methods_c
+IL6R_methods_c <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6-R", typ = "continuous", pri = "secondary", meth = c(unique(.$method))) %>%
+mutate(var_colour = method) %>%
+myforestplot(dt = ., log_T = F, exp_type = "IL6R", limits = c(-0.3,0.1), one_colour = F, effect = "Mean change")
+IL6R_methods_c
+IL6R_alt_methods_c <- results_for_forest_plots %>%
+subset_df(df = ., exp = "IL6-R (alternative)", typ = "continuous", pri = "secondary", meth = c(unique(.$method))) %>%
+mutate(var_colour = method) %>%
+myforestplot(dt = ., log_T = F, exp_type = "IL6R", limits = c(-0.3,0.1), one_colour = F, effect = "Mean change")
+IL6R_alt_methods_c
+all_methods_c <- arrange_func(GlycA_methods_c, CRP_methods_c, IL6_methods_c, IL6R_methods_c)
+save_func("all_methods_inflam_c.png",all_methods_c,6500)
+#Comparing instruments
+subset_df2 <- function(df, exp, meth = "Inverse variance weighted",
+stu = "Metanalysis",  typ = "binary", pri = "primary") {
+df <- filter(df,
+id.exposure %in% exp,
+method %in% meth,
+study == stu,
+type == typ,
+priority == pri
+)
+}
+GlycA_2ivs <- results_for_forest_plots %>%
+subset_df2(df = ., exp = c("GlycA (UKB)","GlycA-IRNT")) %>%
+mutate(var_colour = id.exposure) %>%
+myforestplot(dt = ., exp_type = "GlycA", limits= c(0.25,4), one_colour = F)
+GlycA_2ivs
+save_func("GlycA_2ivs_2.png",GlycA_2ivs, 4000)
+IL6_2ivs <- results_for_forest_plots %>%
+subset_df2(df = ., exp = c("IL6 (Ahluwalia et al)","IL6 (sensitivity)")) %>%
+mutate(var_colour = id.exposure) %>%
+myforestplot(dt = ., exp_type = "IL6", limits= c(0.25,4), one_colour = F)
+IL6_2ivs
+save_func("IL6_2ivs_2.png",IL6_2ivs, 4000)
+IL6R_2ivs <- results_for_forest_plots %>%
+subset_df2(df = ., exp = c("IL6-R","IL6-R (alternative)")) %>%
+mutate(var_colour = id.exposure) %>%
+myforestplot(dt = ., exp_type = "IL6R", limits= c(0.25,4), one_colour = F)
+IL6R_2ivs
+save_func("IL6R_2ivs_2.png",IL6R_2ivs, 4000)
+#SD units forest plots
+prep_func2 <- function(results_file) {
+#rename outcomes
+results_file <- rename(results_file, out_var = outcome) %>%
+merge(., out_info, by.x = "out_var", by.y = "Variable_name")
+#reorder methods
+as.factor(results_file$method)
+results_file$method <- factor(results_file$method, levels = c("Weighted mode", "Weighted median",
+"MR Egger", "Inverse variance weighted"))
+#reorder outcome group
+as.factor(results_file$group)
+results_file$group <- factor(results_file$group, levels = c("Pregnancy loss outcomes", "Maternal morbidity outcomes", "Labour outcomes",
+"Offspring birth outcomes", "Continuous outcomes"))
+# harmonise exposure names between Keaton and Ehret
+results_file <- mutate(results_file, id.exposure = case_when(
+id.exposure == "ebi-a-GCST90012005" ~ "IL6 (Folkerson et al) - IRNT",
+id.exposure == "ebi-a-GCST90012025" ~ "IL6-R (Folkerson et al) - IRNT",
+id.exposure == "ebi-a-GCST90029070" ~ "CRP (Said et al) - SD",
+id.exposure == "IL6" ~ "IL6 (Ahluwalia et al) - SD",
+id.exposure == "GlycA" ~ "GlycA (UKB) - SD",
+id.exposure == "GlycA-IRNT" ~ "GlycA (UKB) - IRNT",
+.default = exposure
+))
+return(results_file)
+}
+results_fp_SD <- prep_func2(results2)
+subset_exposures <- c(
+"CRP (Said et al) - SD",
+"GlycA (UKB) - SD",
+"IL6 (Folkerson et al) - IRNT",
+"IL6-R (Folkerson et al) - IRNT"
+)
+res <- results_fp_SD[results_fp_SD$id.exposure %in% subset_exposures, ]
+res$study <- "Metanalysis"
+ivw_all <- res %>%
+subset_df2(df = ., exp = c(unique(.$id.exposure)), meth = "Inverse variance weighted") %>%
+mutate(var_colour = id.exposure) %>%
+myforestplot(dt = ., exp_type = "inflammation marker", limits= c(0.5,3.5), one_colour = F)
+ivw_all
+save_func("ivw_all_plot2.png", ivw_all, height = 4000)
+ggsave("ivw_all_plot2.pdf", ivw_all, height = 10, width = 10)
+subset_exposures <- c(
+"GlycA (UKB) - SD",
+"GlycA (UKB) - IRNT"
+)
+res_glyca_units <- results_fp_SD[results_fp_SD$id.exposure %in% subset_exposures, ]
+res_glyca_units$study <- "Metanalysis"
+results_fp_SD$study <- "Metanalysis"
+ivw_glyca_units <- res_glyca_units %>%
+subset_df2(df = ., exp = c(unique(.$id.exposure)), meth = "Inverse variance weighted") %>%
+mutate(var_colour = id.exposure) %>%
+myforestplot(dt = ., exp_type = "GlycA", limits= c(0.5,3.5), one_colour = F)
+ivw_glyca_units
+save_func("ivw_glyca_units_plot2.png", ivw_glyca_units, height = 4000)
+ggsave("ivw_glyca_units_plot2.pdf", ivw_glyca_units, height = 10, width = 10)
+GlycA_sens_methods <- results_fp_SD %>%
+subset_df2(df = ., exp = "GlycA (UKB) - SD", meth = c(unique(.$method))) %>%
+mutate(var_colour = method) %>%
+myforestplot(dt = ., exp_type = "GlycA", limits= c(0.5,3.5), one_colour = F)
+GlycA_sens_methods
+save_func("glyca_sd_methods2.png", GlycA_sens_methods, height = 4000)
+crp_sens_methods <- results_fp_SD %>%
+subset_df2(df = ., exp = "CRP (Said et al) - SD", meth = c(unique(.$method))) %>%
+mutate(var_colour = method) %>%
+myforestplot(dt = ., exp_type = "CRP", limits= c(0.5,3.5), one_colour = F)
+save_func("crp_sd_methods2.png", crp_sens_methods, height = 4000)
+il6_sens_IRNT_methods <- results_fp_SD %>%
+subset_df2(df = ., exp = "IL6 (Folkerson et al) - IRNT", meth = c(unique(.$method))) %>%
+mutate(var_colour = method) %>%
+myforestplot(dt = ., exp_type = "IL6", limits= c(0.5,3.5), one_colour = F)
+
+
