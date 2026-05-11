@@ -3949,7 +3949,7 @@ myforestplot_2 <- function(df, log_T = TRUE, xlab, limits)
     xlim= limits
   ) + theme(panel.grid.major.x = element_blank(),axis.text.y = element_text(size = 15)) + geom_text(aes(x = 3, label = estimate),hjust = 0) + geom_point(size = 1) + geom_effect(ggplot2::aes(xmin = .data$.xmin, xmax = .data$.xmax), 
                                                                                              position = ggstance::position_dodgev(height = 0.5),
-                                                                                             size=0.5)
+                                                                                             size=2)
   colours_BP <- c("black", "gold2", "deepskyblue1", "coral", "springgreen3", "purple", "magenta", "turquoise")
   shapes_BP <- c(23L, 21L, 21L, 21L, 21L, 21L, 21L, 21L)
   x <- x + scale_color_manual(values=colours_BP)
