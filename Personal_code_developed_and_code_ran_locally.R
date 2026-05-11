@@ -2349,7 +2349,7 @@ glyca_comb_hits <- rename(glyca_comb_hits, c(
 
 out_func <- function(study_name)
 {
-  # Extract outcome SNPs matching the SNPs in the exposure dataset
+  #outcome SNPs matching the SNPs in the exposure dataset
   outcome_data <- outcome_variables %>% 
     filter(., study==study_name) %>%
     mutate("id" = paste(study, Phenotype, sep = "_")) %>% 
@@ -2960,17 +2960,17 @@ lapply(exposures2, function(exp_name) {
   )
 })
 
-for (exp_name in names(exposure_list)) {
+for (exp_name in names(exposure_list2)) {
   
   # Convert exposure
   exposure_dat <- format_data(
-    exposure_list[[exp_name]],
+    exposure_list2[[exp_name]],
     type = "exposure",
-    snp_col = "RSID",
+    snp_col = "rsid",
     beta_col = "beta",
-    se_col = "se",
+    se_col = "standard_error",
     pval_col = "pval",
-    eaf_col = "EAF",
+    eaf_col = "effect_allele_frequency",
     effect_allele_col = "effect_allele",
     other_allele_col = "other_allele"
   )
@@ -2998,13 +2998,13 @@ for (exp_name in names(exposure_list)) {
     
     outcome_dat$phenotype <- outcome_name
     
-    outcome_dat <- generate_outdat_with_proxies(exposure_dat = exposure_dat, outcome_dat = outcome_dat, outcome_name = outcome_name,proxies = All_proxy_SNPs)
+    outcome_dat <- generate_outdat_with_proxies2(exposure_dat = exposure_dat, outcome_dat = outcome_dat, outcome_name = outcome_name,proxies = All_proxy_SNPs)
     
     # harmonise
     harmonised <- harmonise_data(exposure_dat, outcome_dat)
     harmonised$exposure <- exp_name
     harmonised$outcome <- outcome_name
-    harmonised_list_mat_donut_trios[[paste0(exp_name, "_", outcome_name)]] <- harmonised
+    harmonised_list5[[paste0(exp_name, "_", outcome_name)]] <- harmonised
     
     if (nrow(harmonised) == 0) next
     
@@ -3013,7 +3013,7 @@ for (exp_name in names(exposure_list)) {
     mr_result$exposure <- exp_name
     mr_result$outcome <- outcome_name
     
-    all_results_mat_donut_trios[[paste0(exp_name, "_", outcome_name)]] <- mr_result
+    all_results_mat_donut_trios2[[paste0(exp_name, "_", outcome_name)]] <- mr_result
   }
 }
 
@@ -3031,7 +3031,7 @@ n_out <- harmonised_df %>%
   merge(., out_info, by.x = "outcome", by.y = "Variable_name") %>%
   arrange(priority, group, order)
 
-n_out2 <- harmonised_df %>%
+n_out2 <- harmonised_df2 %>%
   group_by(outcome) %>%
   summarise(
     Ncase_min = min(ncase.outcome),
@@ -3047,3 +3047,970 @@ n_out2 <- harmonised_df %>%
   ungroup %>%
   merge(., out_info, by.x = "outcome", by.y = "Variable_name") %>%
   arrange(priority, group, order)
+
+########
+
+
+########
+
+prep_func <- function(results_file) {
+  
+  #rename outcomes
+  results_file <- rename(results_file, out_var = outcome) %>%
+    merge(., out_info, by.x = "out_var", by.y = "Variable_name")
+  
+  #reorder methods
+  as.factor(results_file$method)
+  results_file$method <- factor(results_file$method, levels = c("Weighted mode", "Weighted median",
+                                                                "MR Egger", "Inverse variance weighted"))
+  
+  #reorder outcome group
+  as.factor(results_file$group)
+  results_file$group <- factor(results_file$group, levels = c("Pregnancy loss outcomes", "Maternal morbidity outcomes", "Labour outcomes",
+                                                              "Offspring birth outcomes", "Continuous outcomes"))
+  
+  # harmonise exposure names
+  results_file <- mutate(results_file, id.exposure = case_when(
+    id.exposure == "ebi-a-GCST90012005" ~ "IL6 (sensitivity)",
+    id.exposure == "ebi-a-GCST90012025" ~ "IL6-R",
+    id.exposure == "ebi-a-GCST90012025-WDT" ~ "IL6-R (alternative)",
+    id.exposure == "ebi-a-GCST90029070" ~ "CRP (Said et al)",
+    id.exposure == "IL6" ~ "IL6 (Ahluwalia et al)",
+    id.exposure == "GlycA" ~ "GlycA (UKB)",
+    .default = id.exposure
+  ))
+  return(results_file)
+  
+}
+
+#######
+
+for (exp_name in names(exposure_list2)) {
+  
+  # Convert exposure
+  exposure_dat <- format_data(
+    exposure_list2[[exp_name]],
+    type = "exposure",
+    snp_col = "rsid",
+    beta_col = "beta",
+    se_col = "standard_error",
+    pval_col = "pval",
+    eaf_col = "effect_allele_frequency",
+    effect_allele_col = "effect_allele",
+    other_allele_col = "other_allele"
+  )
+  exposure_dat$phenotype <- exp_name
+  
+  # Loop outcome
+  for (outcome_name in names(outcome_list2)) {
+    
+    outcome_data_raw <- outcome_list2[[outcome_name]]
+    
+    outcome_data_raw <- as.data.frame(outcome_data_raw)
+    
+    # Convert outcome
+    outcome_dat <- format_data(
+      outcome_data_raw,
+      type = "outcome",
+      snp_col = "SNP",
+      beta_col = "beta",
+      se_col = "se",
+      pval_col = "pval",
+      eaf_col = "eaf",
+      effect_allele_col = "effect_allele",
+      other_allele_col = "other_allele"
+    )
+    
+    outcome_dat$phenotype <- outcome_name
+    
+    outcome_dat <- generate_outdat_with_proxies2(exposure_dat = exposure_dat, outcome_dat = outcome_dat, outcome_name = outcome_name,proxies = All_proxy_SNPs)
+    
+    # harmonise
+    harmonised <- harmonise_data(exposure_dat, outcome_dat)
+    harmonised$exposure <- exp_name
+    harmonised$outcome <- outcome_name
+    harmonised_list2[[paste0(exp_name, "_", outcome_name)]] <- harmonised
+    
+    if (nrow(harmonised) == 0) next
+    
+    # MR 
+    mr_result <- mr(harmonised)
+    mr_result$exposure <- exp_name
+    mr_result$outcome <- outcome_name
+    
+    all_results2[[paste0(exp_name, "_", outcome_name)]] <- mr_result
+  }
+}
+
+######
+
+generate_outdat_with_proxies2 <- function(exposure_dat, outcome_dat, outcome_name,
+                                         proxies){
+  
+  ### Set up
+  i_outcome <- outcome_name
+  # Filter specific outcome dataset to available exposure SNPs
+  tmp_outcome_dat <- outcome_dat %>%
+    filter(SNP %in% exposure_dat$SNP, outcome == i_outcome)
+  
+  ### Remove any duplicated SNPs
+  tmp_outcome_dat <- tmp_outcome_dat[!duplicated(tmp_outcome_dat$SNP), ]
+  
+  if(dim(tmp_outcome_dat)[1] == dim(exposure_dat)[1]){
+    print(paste("No proxies needed for", outcome_name))
+    
+    # Return full outcome dataset if no proxies needed
+    tmp_outcome_dat
+    
+  } else {
+    ### Identify proxies
+    
+    # Specify all available SNPs
+    outcome_snps <- expand.grid(
+      SNP = c(exposure_dat$SNP), outcome = unique(outcome_dat$outcome))
+    # Left join outcome_dat, NAs if missing
+    outcome_snps_available <-
+      left_join(outcome_snps, outcome_dat, by = c("SNP", "outcome")) %>%
+      # Add indicator column for NAs
+      mutate(missing = ifelse(is.na(effect_allele.outcome),
+                              TRUE, FALSE))
+    # Deduplicated list of all SNPs which we need a proxy for
+    need_proxies <- outcome_snps_available %>%
+      filter(missing == TRUE) %>%
+      distinct(SNP)
+    # Count of proxies needed by outcome
+    table(outcome_snps_available$outcome[outcome_snps_available$missing == TRUE])
+    # List of all proxies
+    proxy_snps <- unique(proxies$rsid)
+    # Proxies without query SNPs
+    proxies_merge_diff <- subset(proxies, query_rsid!=rsid)
+    proxies_merge_diff$SNP<-proxies_merge_diff$rsid
+    
+    outcome_dat_proxies_tmp <-subset(outcome_dat,
+                                     outcome_dat$outcome== i_outcome)
+    
+    # All SNPs we need to proxy for this outcome
+    outcome_snps_tmp <- subset(outcome_snps, outcome_snps$outcome==i_outcome)
+    # Available SNPs in outcome data:
+    outcome_snps_available <-
+      left_join(outcome_snps_tmp, outcome_dat, by = c("SNP", "outcome")) %>%
+      # Add indicator column for NAs
+      mutate(missing = ifelse(is.na(effect_allele.outcome),
+                              TRUE, FALSE))
+    # SNPs not available for our outcome in outcome data, for which we need proxies:
+    need_proxies <- outcome_snps_available %>%
+      filter(missing == TRUE) %>%
+      distinct(SNP)
+    
+    if(dim(need_proxies)[1] > 0){
+      
+      print(paste0("Searching for proxies for ", dim(need_proxies)[1], " SNPs."))
+      
+      # Append proxies information -
+      # For every SNP needing a proxy ('SNP'),
+      # create row with information about the proxy ('rsid' & 'SNP.y' columns)
+      tmp1 <- merge(x=need_proxies, y=proxies_merge_diff, by.x="SNP", by.y="query_rsid", all.x=TRUE)
+      
+      # For each proxy SNP ('rsid'), append the extracted proxy-outcome GWAS data
+      tmp2 <-merge(x=tmp1, y=outcome_dat_proxies_tmp, by.x="rsid", by.y="SNP", all.y=TRUE)
+      # this leaves NAs where any proxy SNPs could not be extracted
+      # since they were not available in outcome data
+      
+      # Exclude palindromic proxies:
+      tmp2 <-subset(tmp2, !(effect_allele.outcome == "A" & other_allele.outcome == "T" |
+                              effect_allele.outcome == "T" & other_allele.outcome == "A") )
+      tmp2 <-subset(tmp2, !(effect_allele.outcome == "C" & other_allele.outcome == "G" |
+                              effect_allele.outcome == "G" & other_allele.outcome == "C") )
+      
+      # Select the proxy SNP ('rsid') in highest LD with the query SNP ('SNP') needing a proxy -
+      set.seed(67898) # to ensure slice_sample() is reproducible
+      tmp3 <- tmp2 %>%
+        group_by(SNP) %>%
+        # Remove any proxies with missing outcome data
+        drop_na() %>%
+        # Select max R2 value, keep ties if several have same R2
+        slice_max(R2, with_ties = TRUE) %>%
+        # Select random proxy SNP if several have same R2
+        slice_sample(n = 1)
+      
+    }
+    
+    # Stop searching for proxies if no SNP-outcome data available
+    if( (dim(need_proxies)[1] > 0) & (dim(tmp3)[1] == 0) ){
+      
+      print("No proxy-outcome associations available for any SNPs.")
+      
+    } else {
+      
+      # Add column specifying proxy effect allele
+      # checking proxy outcome data and using original SNP alleles
+      # using query SNP alleles but checking they're the right way round using proxy outcome data
+      #'Correlated alleles' format:
+      # query effect allele = proxy effect allele, query other allele = proxy other allele
+      tmp4 <- tmp3
+      tmp4$effect_allele.proxy <- apply(tmp4, 1, function(row) {
+        
+        # If outcome effect allele same as proxy effect allele, treat as if using query effect allele -
+        if (row["effect_allele.outcome"] == substr(row["Correlated_Alleles"], 3, 3)) {
+          return(substr(row["Correlated_Alleles"], 1, 1))
+          # if outcome effect allele same as proxy other allele, treat as if using query other allele -
+        } else if (row["effect_allele.outcome"] == substr(row["Correlated_Alleles"], 7, 7)) {
+          return(substr(row["Correlated_Alleles"], 5, 5))
+        } else {
+          return("default_value")
+        }
+      })
+      # Same again but for other allele -
+      tmp4$other_allele.proxy <- apply(tmp4, 1, function(row) {
+        if (row["other_allele.outcome"] == substr(row["Correlated_Alleles"], 3, 3)) {
+          return(substr(row["Correlated_Alleles"], 1, 1))
+        } else if (row["other_allele.outcome"] == substr(row["Correlated_Alleles"], 7, 7)) {
+          return(substr(row["Correlated_Alleles"], 5, 5))
+        } else {
+          return("default_value")
+        }
+      })
+      
+      # Treat proxy alleles as the outcome alleles
+      tmp5 <- tmp4
+      tmp5$effect_allele.outcome<-tmp5$effect_allele.proxy
+      tmp5$other_allele.outcome<-tmp5$other_allele.proxy
+      tmp5$data_source.outcome <- NA
+      
+      # Create final dataframe which has replaced missing SNPs with their proxies
+      outcome_dat_cols <- colnames(outcome_dat)
+      tmp5 <- tmp5 %>% select(all_of(outcome_dat_cols))
+      
+      # Return message with number of SNPs which could be proxied
+      print(paste0(dim(tmp5)[1], " proxies identified."))
+      
+      tmp_outcome_dat <- rbind(tmp_outcome_dat, tmp5)
+    }
+    
+  }
+  
+  # Return full outcome dataset with added proxies
+  tmp_outcome_dat
+  
+}
+
+######
+
+plot_merger_func3 <- function(A, B, C){
+  plot.new()
+  par(mar=c(1,1,1,1), mgp=c(3,1,0))
+  x <- ggarrange(A, B,C, labels=c('A', 'B','C'),
+                 ncol = 2, nrow = 2, common.legend = T, hjust = -3, legend = "bottom")
+  print(x)
+}
+
+#######
+
+for (this_exp in all_exposures) {
+  outcomes <- unique(all_mr_summary2$outcome[all_mr_summary2$exposure == this_exp])
+  plot_list <- list()
+  for (this_out in outcomes) {
+    mr_sub <- subset(all_mr_summary2, exposure == this_exp & outcome == this_out)
+    dat_sub <- subset(harmonised_df2, exposure == this_exp & outcome == this_out)
+    mr_sub <- subset(mr_sub, method %in% c("Inverse variance weighted", "MR Egger", "Weighted median"))
+    if (nrow(dat_sub) >= 3 & nrow(mr_sub) > 0) {
+      p <- mr_scatter_plot(mr_sub, dat_sub)[[1]] +
+        ggtitle(paste0(this_exp, " → ", this_out))
+      plot_list[[this_out]] <- p
+    }
+  }
+  if (length(plot_list) > 0) {
+    combined_plot <- wrap_plots(plot_list, ncol = 4, nrow = 3) +
+      plot_annotation(title = paste0("MR Scatter Plots for ", this_exp))
+    file_name <- paste0("scatter_", gsub("[^A-Za-z0-9]", "_", this_exp), "_combined.png")
+    ggsave(filename = file.path(output_dir, file_name),
+           plot = combined_plot,
+           width = 4 * 4,
+           height = 4 * 3,
+           dpi = 300)
+  }
+}
+
+####
+
+n_out3 <- BiB_WE %>%
+  group_by(Phenotype) %>%
+  summarise(
+    Ncase_min = min(ncase),
+    Ncontrol_min = min(ncontrol),
+    N_min = min(samplesize),
+    Ncase_median = median(ncase),
+    Ncontrol_median = median(ncontrol),
+    N_median = median(samplesize),
+    Ncase_max = max(ncase),
+    Ncontrol_max = max(ncontrol),
+    N_max = max(samplesize)
+  ) %>%
+  ungroup %>%
+  merge(., out_info, by.x = "Phenotype", by.y = "Variable_name") %>%
+  arrange(priority, group, order)
+
+#####
+
+myforestplot_2 <- function(df, log_T = TRUE, xlab, limits)
+{
+  x <- forestplot(
+    df = df,
+    estimate = b,     
+    se = se,
+    pvalue = pval,
+    name = outcome,
+    logodds = log_T,
+    #title = title,
+    xlab = xlab,
+    xlim= limits
+  ) + theme_forest(base_size = 20) + geom_text(aes(x = 1, label = b),hjust = -2)
+  colours_BP <- c("black", "gold2", "deepskyblue1", "coral", "springgreen3", "purple", "magenta", "turquoise")
+  shapes_BP <- c(23L, 21L, 21L, 21L, 21L, 21L, 21L, 21L)
+  x <- x + scale_color_manual(values=colours_BP)
+  #x <- x + scale_x_continuous(breaks = c(0.5, 1, 1.5, 2, 2.5, 3, 5))
+  x <- x + ggplot2::scale_shape_manual(values = shapes_BP)
+  print(x)
+}
+
+save_func <- function(file_name, plot_name, height)
+{
+  png(file_name, res=330, height=height, width=12000)
+  print(plot_name)
+  dev.off()
+}
+
+myforestplot_3 <- function(df, log_T = TRUE, xlab, limits)
+{
+  x <- forestplot(
+    df = df,
+    estimate = b,     
+    se = se,
+    pvalue = pval,
+    name = outcome,
+    logodds = log_T,
+    #title = title,
+    xlab = xlab,
+    xlim= limits,
+    colour = method,
+    shape = method
+  ) + theme_forest(base_size = 15)
+  colours_BP <- c("black", "gold2", "deepskyblue1", "coral", "springgreen3", "purple", "magenta", "turquoise")
+  shapes_BP <- c(23L, 21L, 21L, 21L, 21L, 21L, 21L, 21L)
+  x <- x + scale_color_manual(values=colours_BP)
+  #x <- x + scale_x_continuous(breaks = c(0.5, 1, 1.5, 2, 2.5, 3, 5))
+  x <- x + ggplot2::scale_shape_manual(values = shapes_BP)
+  print(x)
+}
+
+plot_merger_func4 <- function(A, B){
+  plot.new()
+  par(mar=c(1,1,1,1), mgp=c(3,1,0))
+  x <- ggarrange(A, B, labels=c('A', 'B'),
+                 ncol = 2, nrow = 1, common.legend = T, hjust = -3, legend = "bottom")
+  print(x)
+}
+
+myforestplot_4 <- function(df, log_T = TRUE, xlab, limits)
+{
+  x <- forestplot(
+    df = df,
+    estimate = b,    # b and se have already been multiplied by 10 
+    se = se,
+    pvalue = pval,
+    name = A,
+    logodds = log_T,
+    colour = adjustment,
+    #title = title,
+    xlab = xlab,
+    xlim= limits, 
+    shape = adjustment
+  ) + theme_forest(base_size = 20)
+  colours_BP <- c("black", "gold2", "deepskyblue1", "coral", "springgreen3", "purple", "magenta", "turquoise")
+  shapes_BP <- c(23L, 21L, 21L, 21L, 21L, 21L, 21L, 21L)
+  x <- x + scale_color_manual(values=colours_BP)
+  #x <- x + scale_x_continuous(breaks = c(0.5, 1, 1.5, 2, 2.5, 3, 5))
+  x <- x + ggplot2::scale_shape_manual(values = shapes_BP)
+  print(x)
+}
+
+####
+
+myforestplot_2 <- function(df, log_T = TRUE, xlab, limits)
+{
+  x <- forestplot(
+    df = df,
+    estimate = b,     
+    se = se,
+    pvalue = pval,
+    name = outcome,
+    logodds = log_T,
+    #title = title,
+    xlab = xlab,
+    xlim= limits
+  ) + theme(
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_text(size = 140),
+    axis.title.x = element_text(size = 140),
+    axis.text.y = element_text(size = 170)
+  ) + geom_text(aes(x = 3, label = estimate),hjust = 0,size = 50) + annotate("text", label = "OR (95% CI)",x = 5.2,y = 12.3,fontface = "bold",size = 50)
+  colours_BP <- c("black", "gold2", "deepskyblue1", "coral", "springgreen3", "purple", "magenta", "turquoise")
+  shapes_BP <- c(23L, 21L, 21L, 21L, 21L, 21L, 21L, 21L)
+  x <- x + scale_color_manual(values=colours_BP)
+  #x <- x + scale_x_continuous(breaks = c(0.5, 1, 1.5, 2, 2.5, 3, 5))
+  x <- x + ggplot2::scale_shape_manual(values = shapes_BP)
+  print(x)
+}
+
+plot_merger_func5 <- function(A, B, C, D, E, F){
+  plot.new()
+  par(mar=c(1,1,1,1), mgp=c(3,1,0))
+  x <- ggarrange(A, B, C, D, E, F, labels=c('A', 'B','C','D','E','F'),
+                 ncol = 6, nrow = 1, common.legend = T, hjust = -3, legend = "bottom")
+  print(x)
+}
+
+plot_merger_func6 <- function(A, B, C, D, E){
+  plot.new()
+  par(mar=c(1,1,1,1), mgp=c(3,1,0))
+  x <- ggarrange(A, B, C, D, E, labels=c('A', 'B','C','D','E'),
+                 ncol = 5, nrow = 1, common.legend = T, hjust = -3, legend = "bottom")
+  print(x)
+}
+
+plot_merger_func7 <- function(A, B, C, D){
+  plot.new()
+  par(mar=c(1,1,1,1), mgp=c(3,1,0))
+  x <- ggarrange(A, B, C, D, labels=c('A', 'B','C','D'),
+                 ncol = 4, nrow = 1, common.legend = T, hjust = -3, legend = "bottom")
+  print(x)
+}
+
+myforestplot_3 <- function(df, log_T = TRUE, xlab, limits)
+{
+  x <- forestplot(
+    df = df,
+    estimate = b,     
+    se = se,
+    pvalue = pval,
+    name = method,
+    logodds = log_T,
+    #title = title,
+    xlab = xlab,
+    xlim= limits,
+    colour = method
+  ) + theme(
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_text(size = 120),
+    axis.title.x = element_text(size = 120),
+    axis.text.y = element_text(size = 120),
+    strip.text = element_text(size = 120),
+    legend.position="none"
+  ) + geom_text(aes(x = 4, label = estimate),hjust = 0,size = 40) + ggforce::facet_col(
+    facets = ~outcome,
+    scales = "free_y",
+    space = "free",
+    labeller = labeller(outcome = function(x) sprintf("%-68s OR (95%% CI)", x))
+  )
+  colours_BP <- c("black", "gold2", "deepskyblue1", "coral", "springgreen3", "purple", "magenta", "turquoise")
+  shapes_BP <- c(23L, 21L, 21L, 21L, 21L, 21L, 21L, 21L)
+  x <- x + scale_color_manual(values=colours_BP)
+  #x <- x + scale_x_continuous(breaks = c(0.5, 1, 1.5, 2, 2.5, 3, 5))
+  x <- x + ggplot2::scale_shape_manual(values = shapes_BP)
+  print(x)
+}
+
+######
+
+for (exp_name in names(exposure_list2)) {
+  
+  # Convert exposure
+  exposure_dat <- format_data(
+    exposure_list2[[exp_name]],
+    type = "exposure",
+    snp_col = "SNP",
+    beta_col = "beta.exposure",
+    se_col = "se.exposure",
+    pval_col = "pval.exposure",
+    eaf_col = "eaf.exposure",
+    effect_allele_col = "effect_allele.exposure",
+    other_allele_col = "other_allele.exposure"
+  )
+  exposure_dat$phenotype <- exp_name
+  
+  # Loop outcome
+  for (outcome_name in names(outcome_list2)) {
+    
+    outcome_data_raw <- outcome_list2[[outcome_name]]
+    
+    outcome_data_raw <- as.data.frame(outcome_data_raw)
+    
+    # Convert outcome
+    outcome_dat <- format_data(
+      outcome_data_raw,
+      type = "outcome",
+      snp_col = "SNP",
+      beta_col = "beta",
+      se_col = "se",
+      pval_col = "pval",
+      eaf_col = "eaf",
+      effect_allele_col = "effect_allele",
+      other_allele_col = "other_allele"
+    )
+    
+    # harmonise
+    harmonised <- harmonise_data(exposure_dat, outcome_dat)
+    harmonised$exposure <- exp_name
+    harmonised$outcome <- outcome_name
+    harmonised_list2[[paste0(exp_name, "_", outcome_name)]] <- harmonised
+    
+    if (nrow(harmonised) == 0) next
+    
+    # MR 
+    mr_result <- mr(harmonised)
+    mr_result$exposure <- exp_name
+    mr_result$outcome <- outcome_name
+    
+    all_results2[[paste0(exp_name, "_", outcome_name)]] <- mr_result
+  }
+}
+
+exposure_dat <- format_data(
+       fincl_EUR,
+   type = "exposure",
+   snp_col = "rsid",
+   beta_col = "beta",
+   se_col = "standard_error",
+   pval_col = "pval",
+   eaf_col = "effect_allele_frequency",
+   effect_allele_col = "effect_allele",
+   other_allele_col = "other_allele"
+   )
+
+######
+
+myforestplot_3 <- function(df, log_T = TRUE, xlab, limits)
+{
+  x <- forestplot(
+    df = df,
+    estimate = b,
+    se = se,
+    pvalue = pval,
+    name = method,
+    logodds = log_T,
+    #title = title,
+    xlab = xlab,
+    xlim= limits,
+    colour = method
+  ) + theme(
+    plot.margin = margin(5.5, 5.5, 5.5, 5.5),
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_text(size = 60),
+    axis.title.x = element_text(size = 90),
+    axis.text.y = element_text(size = 100),
+    strip.text = element_text(size = 90),
+    legend.position = "none",
+    legend.title = element_text(size = 90),
+    legend.text = element_text(size = 90)
+  ) + geom_point(size = 15) + geom_line(size = 10) + guides(colour = guide_legend(override.aes = list(size = 24)))  + ggforce::facet_col(
+    facets = ~outcome,
+    scales = "free_y",
+    space = "free"
+  )
+  colours_BP <- c("black", "gold2", "deepskyblue1", "coral", "springgreen3", "purple", "magenta", "turquoise")
+  shapes_BP <- c(23L, 21L, 21L, 21L, 21L, 21L, 21L, 21L)
+  x <- x + scale_color_manual(values=colours_BP)
+  #x <- x + scale_x_continuous(breaks = c(0.5, 1, 1.5, 2, 2.5, 3, 5))
+  x <- x + ggplot2::scale_shape_manual(values = shapes_BP)
+  print(x)
+}
+
+p_left <- new_methods_results3 %>% filter(exposure == "F-INCL") %>% ggplot(aes(y = factor(method,levels = rev(unique(method))))) + geom_text(aes(x = 0, label = estimate),hjust = 1,size = 30) + scale_x_continuous(expand = c(0, 0)) + theme_void() + theme( plot.margin = margin(5.5, 0, 5.5, 0),strip.text = element_text(size = 120,colour = "white")) + ggforce::facet_col(
+  facets = ~outcome,
+  scales = "free_y",
+  space = "free")
+
+myforestplot_2 <- function(df, log_T = TRUE, xlab, limits)
+{
+  x <- forestplot(
+    df = df,
+    estimate = b,     
+    se = se,
+    pvalue = pval,
+    name = outcome,
+    logodds = log_T,
+    #title = title,
+    xlab = xlab,
+    xlim= limits
+  ) + theme(
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_text(size = 400),
+    axis.title.x = element_text(size = 400),
+    axis.text.y = element_text(size = 400)
+  ) + geom_text(aes(x = 3, label = estimate),hjust = 0,size = 160) + geom_point(size = 30) + geom_line(linewidth = 6)
+  colours_BP <- c("black", "gold2", "deepskyblue1", "coral", "springgreen3", "purple", "magenta", "turquoise")
+  shapes_BP <- c(23L, 21L, 21L, 21L, 21L, 21L, 21L, 21L)
+  x <- x + scale_color_manual(values=colours_BP)
+  #x <- x + scale_x_continuous(breaks = c(0.5, 1, 1.5, 2, 2.5, 3, 5))
+  x <- x + ggplot2::scale_shape_manual(values = shapes_BP)
+  print(x)
+}
+
+########
+
+n_out_stu <- stu2 %>%
+  group_by(Phenotype) %>%
+  summarise(
+    Ncase_min = min(ncase),
+    Ncontrol_min = min(ncontrol),
+    N_min = min(ncase) + min(ncontrol),
+    Ncase_median = median(ncase),
+    Ncontrol_median = median(ncontrol),
+    N_median = median(ncase) + median(ncontrol),
+    Ncase_max = max(ncase),
+    Ncontrol_max = max(ncontrol),
+    N_max = max(ncase) + max(ncontrol)
+  ) 
+
+
+####
+
+myforestplot_3 <- function(df, log_T = TRUE, xlab, limits)
+{
+  x <- forestplot(
+    df = df,
+    estimate = b,
+    se = se,
+    pvalue = pval,
+    name = method,
+    logodds = log_T,
+    #title = title,
+    xlab = xlab,
+    xlim= limits,
+    colour = method
+  ) + theme(
+    panel.grid.major.x = element_blank(),
+    legend.position = "none",
+    text = element_text(size = 4),   
+    axis.title = element_text(size = 4),
+    axis.text = element_text(size = 3),
+    legend.text = element_text(size = 3),
+    legend.title = element_text(size = 4),
+    plot.margin = margin(1, 1, 1,1)
+  )  + ggforce::facet_col(
+    facets = ~outcome,
+    scales = "free_y",
+    space = "free"
+  )
+  colours_BP <- c("black", "gold2", "deepskyblue1", "coral", "springgreen3", "purple", "magenta", "turquoise")
+  shapes_BP <- c(23L, 21L, 21L, 21L, 21L, 21L, 21L, 21L)
+  x <- x + scale_color_manual(values=colours_BP)
+  #x <- x + scale_x_continuous(breaks = c(0.5, 1, 1.5, 2, 2.5, 3, 5))
+  x <- x + ggplot2::scale_shape_manual(values = shapes_BP)
+  print(x)
+}
+####
+
+for (exp_name in names(exposure_list2)) {
+  # Convert exposure
+  exposure_dat <- format_data(
+    exposure_list2[[exp_name]],
+    type = "exposure",
+    snp_col = "rsid",
+    beta_col = "beta",
+    se_col = "standard_error",
+    pval_col = "pval",
+    eaf_col = "effect_allele_frequency",
+    effect_allele_col = "effect_allele",
+    other_allele_col = "other_allele"
+  )
+  exposure_dat$phenotype <- exp_name
+  # Loop outcome
+  for (outcome_name in names(outcome_list2)) {
+    outcome_data_raw <- outcome_list2[[outcome_name]]
+    outcome_data_raw <- as.data.frame(outcome_data_raw)
+    # Convert outcome
+    outcome_dat <- format_data(
+      outcome_data_raw,
+      type = "outcome",
+      snp_col = "SNP",
+      beta_col = "beta",
+      se_col = "se",
+      pval_col = "pval",
+      eaf_col = "eaf",
+      effect_allele_col = "effect_allele",
+      other_allele_col = "other_allele"
+    )
+    outcome_dat$phenotype <- outcome_name
+    outcome_dat <- generate_outdat_with_proxies2(exposure_dat = exposure_dat, outcome_dat = outcome_dat, outcome_name = outcome_name,proxies = All_proxy_SNPs)
+    # harmonise
+    harmonised <- harmonise_data(exposure_dat, outcome_dat)
+    harmonised$exposure <- exp_name
+    harmonised$outcome <- outcome_name
+    harmonised_list3[[paste0(exp_name, "_", outcome_name)]] <- harmonised
+    if (nrow(harmonised) == 0) next
+    # MR
+    mr_result <- mr(harmonised)
+    mr_result$exposure <- exp_name
+    mr_result$outcome <- outcome_name
+    all_results3[[paste0(exp_name, "_", outcome_name)]] <- mr_result
+  }
+}
+
+outcome_dat <- format_data(
+  as.data.frame(outcome_list2[["sga"]]),
+  type = "outcome",
+  snp_col = "SNP",
+  beta_col = "beta",
+  se_col = "se",
+  pval_col = "pval",
+  eaf_col = "eaf",
+  effect_allele_col = "effect_allele",
+  other_allele_col = "other_allele"
+)
+
+exposure_dat <- format_data(
+  exposure_list2[["M-ALL"]],
+  type = "exposure",
+  snp_col = "rsid",
+  beta_col = "beta",
+  se_col = "standard_error",
+  pval_col = "pval",
+  eaf_col = "effect_allele_frequency",
+  effect_allele_col = "effect_allele",
+  other_allele_col = "other_allele"
+)
+
+##
+
+generate_outdat_with_proxies3 <- function(exposure_dat, outcome_dat, outcome_name,
+                                          proxies){
+  
+  ### Set up
+  i_outcome <- outcome_name
+  # Filter specific outcome dataset to available exposure SNPs
+  tmp_outcome_dat <- outcome_dat %>%
+    filter(SNP %in% exposure_dat$SNP, outcome == i_outcome)
+  
+  ### Remove any duplicated SNPs
+  tmp_outcome_dat <- tmp_outcome_dat[!duplicated(tmp_outcome_dat$SNP), ]
+  
+  if(dim(tmp_outcome_dat)[1] == dim(exposure_dat)[1]){
+    print(paste("No proxies needed for", outcome_name))
+    
+    # Return full outcome dataset if no proxies needed
+    tmp_outcome_dat
+    
+  } else {
+    ### Identify proxies
+    
+    # Specify all available SNPs
+    outcome_snps <- expand.grid(
+      SNP = c(exposure_dat$SNP), outcome = unique(outcome_dat$outcome))
+    # Left join outcome_dat, NAs if missing
+    outcome_snps_available <-
+      left_join(outcome_snps, outcome_dat, by = c("SNP", "outcome")) %>%
+      # Add indicator column for NAs
+      mutate(missing = ifelse(is.na(effect_allele.outcome),
+                              TRUE, FALSE))
+    # Deduplicated list of all SNPs which we need a proxy for
+    need_proxies <- outcome_snps_available %>%
+      filter(missing == TRUE) %>%
+      distinct(SNP)
+    # Count of proxies needed by outcome
+    table(outcome_snps_available$outcome[outcome_snps_available$missing == TRUE])
+    # List of all proxies
+    proxy_snps <- unique(proxies$rsid)
+    # Proxies without query SNPs
+    proxies_merge_diff <- subset(proxies, query_rsid!=rsid)
+    proxies_merge_diff$SNP<-proxies_merge_diff$rsid
+    
+    outcome_dat_proxies_tmp <-subset(outcome_dat,
+                                     outcome_dat$outcome== i_outcome)
+    
+    # All SNPs we need to proxy for this outcome
+    outcome_snps_tmp <- subset(outcome_snps, outcome_snps$outcome==i_outcome)
+    # Available SNPs in outcome data:
+    outcome_snps_available <-
+      left_join(outcome_snps_tmp, outcome_dat, by = c("SNP", "outcome")) %>%
+      # Add indicator column for NAs
+      mutate(missing = ifelse(is.na(effect_allele.outcome),
+                              TRUE, FALSE))
+    # SNPs not available for our outcome in outcome data, for which we need proxies:
+    need_proxies <- outcome_snps_available %>%
+      filter(missing == TRUE) %>%
+      distinct(SNP)
+    
+    if(dim(need_proxies)[1] > 0){
+      
+      print(paste0("Searching for proxies for ", dim(need_proxies)[1], " SNPs."))
+      
+      # Append proxies information -
+      # For every SNP needing a proxy ('SNP'),
+      # create row with information about the proxy ('rsid' & 'SNP.y' columns)
+      tmp1 <- merge(x=need_proxies, y=proxies_merge_diff, by.x="SNP", by.y="query_rsid", all.x=TRUE)
+      
+      # For each proxy SNP ('rsid'), append the extracted proxy-outcome GWAS data
+      tmp2 <-merge(x=tmp1, y=outcome_dat_proxies_tmp, by.x="rsid", by.y="SNP", all.y=TRUE)
+      # this leaves NAs where any proxy SNPs could not be extracted
+      # since they were not available in outcome data
+      
+      # Exclude palindromic proxies:
+      tmp2 <-subset(tmp2, !(effect_allele.outcome == "A" & other_allele.outcome == "T" |
+                              effect_allele.outcome == "T" & other_allele.outcome == "A") )
+      tmp2 <-subset(tmp2, !(effect_allele.outcome == "C" & other_allele.outcome == "G" |
+                              effect_allele.outcome == "G" & other_allele.outcome == "C") )
+      
+      # Select the proxy SNP ('rsid') in highest LD with the query SNP ('SNP') needing a proxy -
+      set.seed(67898) # to ensure slice_sample() is reproducible
+      tmp3 <- tmp2 %>%
+        group_by(SNP) %>%
+        # Remove any proxies with missing outcome data
+        drop_na() %>%
+        # Select max R2 value, keep ties if several have same R2
+        slice_max(R2, with_ties = TRUE) %>%
+        # Select random proxy SNP if several have same R2
+        slice_sample(n = 1)
+      
+    }
+    
+    # Stop searching for proxies if no SNP-outcome data available
+    if( (dim(need_proxies)[1] > 0) & (dim(tmp3)[1] == 0) ){
+      
+      print("No proxy-outcome associations available for any SNPs.")
+      
+    } else {
+      
+      # Add column specifying proxy effect allele
+      # checking proxy outcome data and using original SNP alleles
+      # using query SNP alleles but checking they're the right way round using proxy outcome data
+      #'Correlated alleles' format:
+      # query effect allele = proxy effect allele, query other allele = proxy other allele
+      tmp4 <- tmp3
+      tmp4$effect_allele.proxy <- apply(tmp4, 1, function(row) {
+        
+        # If outcome effect allele same as proxy effect allele, treat as if using query effect allele -
+        if (row["effect_allele.outcome"] == substr(row["Correlated_Alleles"], 3, 3)) {
+          return(substr(row["Correlated_Alleles"], 1, 1))
+          # if outcome effect allele same as proxy other allele, treat as if using query other allele -
+        } else if (row["effect_allele.outcome"] == substr(row["Correlated_Alleles"], 7, 7)) {
+          return(substr(row["Correlated_Alleles"], 5, 5))
+        } else {
+          return("default_value")
+        }
+      })
+      # Same again but for other allele -
+      tmp4$other_allele.proxy <- apply(tmp4, 1, function(row) {
+        if (row["other_allele.outcome"] == substr(row["Correlated_Alleles"], 3, 3)) {
+          return(substr(row["Correlated_Alleles"], 1, 1))
+        } else if (row["other_allele.outcome"] == substr(row["Correlated_Alleles"], 7, 7)) {
+          return(substr(row["Correlated_Alleles"], 5, 5))
+        } else {
+          return("default_value")
+        }
+      })
+    }
+  }
+      tmp4
+}
+
+#######
+
+n_out4 <- harmonised_df3 %>%
+  group_by(outcome) %>%
+  summarise(
+    Ncase_min = min(ncase.outcome),
+    Ncontrol_min = min(ncontrol.outcome),
+    N_min = min(samplesize.outcome),
+    Ncase_median = median(ncase.outcome),
+    Ncontrol_median = median(ncontrol.outcome),
+    N_median = median(samplesize.outcome),
+    Ncase_max = max(ncase.outcome),
+    Ncontrol_max = max(ncontrol.outcome),
+    N_max = max(samplesize.outcome)
+  ) %>%
+  ungroup %>%
+  merge(., out_info, by.x = "outcome", by.y = "Variable_name") %>%
+  arrange(priority, group, order)
+
+######
+
+myforestplot_2 <- function(df, log_T = TRUE, xlab, limits)
+{
+  x <- forestplot(
+    df = df,
+    estimate = b,     
+    se = se,
+    pvalue = pval,
+    name = outcome,
+    logodds = log_T,
+    #title = title,
+    xlab = xlab,
+    xlim= limits
+  ) + theme(panel.grid.major.x = element_blank(),axis.text.y = element_text(size = 15)) + geom_text(aes(x = 3, label = estimate),hjust = 0) + geom_point(size = 1) + geom_effect(ggplot2::aes(xmin = .data$.xmin, xmax = .data$.xmax), 
+                                                                                             position = ggstance::position_dodgev(height = 0.5),
+                                                                                             size=0.5)
+  colours_BP <- c("black", "gold2", "deepskyblue1", "coral", "springgreen3", "purple", "magenta", "turquoise")
+  shapes_BP <- c(23L, 21L, 21L, 21L, 21L, 21L, 21L, 21L)
+  x <- x + scale_color_manual(values=colours_BP)
+  #x <- x + scale_x_continuous(breaks = c(0.5, 1, 1.5, 2, 2.5, 3, 5))
+  x <- x + ggplot2::scale_shape_manual(values = shapes_BP)
+  print(x)
+}
+
+myforestplot_3 <- function(df, log_T = TRUE, xlab, limits)
+{
+  x <- forestplot(
+    df = df,
+    estimate = b,
+    se = se,
+    pvalue = pval,
+    name = method,
+    logodds = log_T,
+    #title = title,
+    xlab = xlab,
+    xlim= limits,
+    colour = method
+  ) + theme(
+    panel.grid.major.x = element_blank(),
+    legend.position = "bottom",
+    legend.justification = c(0.6,0.5),
+    legend.text = element_text(size = 7),
+    plot.margin = margin(1, 1, 1,1)
+  ) + geom_effect(ggplot2::aes(xmin = .data$.xmin, xmax = .data$.xmax,colour = method), 
+                  position = ggstance::position_dodgev(height = 0.5),
+                  size=0.5) + ggforce::facet_col(
+    facets = ~outcome,
+    scales = "free_y",
+    space = "free"
+  )
+  colours_BP <- c("black", "gold2", "deepskyblue1", "coral", "springgreen3", "purple", "magenta", "turquoise")
+  shapes_BP <- c(23L, 21L, 21L, 21L, 21L, 21L, 21L, 21L)
+  x <- x + scale_color_manual(values=colours_BP)
+  #x <- x + scale_x_continuous(breaks = c(0.5, 1, 1.5, 2, 2.5, 3, 5))
+  x <- x + ggplot2::scale_shape_manual(values = shapes_BP)
+  print(x)
+}
+
+myforestplot_5 <- function(df, log_T = TRUE, xlab, limits)
+{
+  x <- forestplot(
+    df = df,
+    estimate = b,     
+    se = se,
+    pvalue = p,
+    name = SNP,
+    logodds = log_T,
+    #title = title,
+    xlab = xlab,
+    xlim= limits
+  ) + theme(panel.grid.major.x = element_blank(),axis.text.y = element_text(size = 15)) + geom_point(size = 1) + geom_effect(ggplot2::aes(xmin = .data$.xmin, xmax = .data$.xmax), 
+                                                                                                                                                                                 position = ggstance::position_dodgev(height = 0.5),
+                                                                                                                                                                                 size=2)
+  colours_BP <- c("black", "gold2", "deepskyblue1", "coral", "springgreen3", "purple", "magenta", "turquoise")
+  shapes_BP <- c(23L, 21L, 21L, 21L, 21L, 21L, 21L, 21L)
+  x <- x + scale_color_manual(values=colours_BP)
+  #x <- x + scale_x_continuous(breaks = c(0.5, 1, 1.5, 2, 2.5, 3, 5))
+  x <- x + ggplot2::scale_shape_manual(values = shapes_BP)
+  print(x)
+}
