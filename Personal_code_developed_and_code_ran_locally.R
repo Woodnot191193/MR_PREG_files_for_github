@@ -3949,7 +3949,7 @@ myforestplot_2 <- function(df, log_T = TRUE, xlab, limits)
     xlim= limits
   ) + theme(panel.grid.major.x = element_blank(),axis.text.y = element_text(size = 15)) + geom_text(aes(x = 3, label = estimate),hjust = 0) + geom_point(size = 1) + geom_effect(ggplot2::aes(xmin = .data$.xmin, xmax = .data$.xmax), 
                                                                                              position = ggstance::position_dodgev(height = 0.5),
-                                                                                             size=2)
+                                                                                             size=0.5)
   colours_BP <- c("black", "gold2", "deepskyblue1", "coral", "springgreen3", "purple", "magenta", "turquoise")
   shapes_BP <- c(23L, 21L, 21L, 21L, 21L, 21L, 21L, 21L)
   x <- x + scale_color_manual(values=colours_BP)
@@ -3979,12 +3979,14 @@ myforestplot_3 <- function(df, log_T = TRUE, xlab, limits)
     plot.margin = margin(1, 1, 1,1)
   ) + geom_effect(ggplot2::aes(xmin = .data$.xmin, xmax = .data$.xmax,colour = method), 
                   position = ggstance::position_dodgev(height = 0.5),
-                  size=0.5) + ggforce::facet_col(
+                  size=0.5) + geom_segment(data = subset(df,UCI > limits[2]),aes(x = limits[2]-0.05,xend = limits[2]+2.5,y = method,yend = method,colour = method),arrow = arrow(length = unit(4,"mm")),show.legend = FALSE) + 
+    geom_segment(data = subset(df,LCI < limits[1]),aes(x = limits[1]+0.05,xend = limits[1]-0.03,y = method,yend = method,colour = method),arrow = arrow(length = unit(4,"mm")),show.legend = FALSE)  + 
+    ggforce::facet_col(
     facets = ~outcome,
     scales = "free_y",
     space = "free"
   )
-  colours_BP <- c("black", "gold2", "deepskyblue1", "coral", "springgreen3", "purple", "magenta", "turquoise")
+  colours_BP <- c("gold2", "deepskyblue1", "coral", "black", "springgreen3", "purple", "magenta", "turquoise")
   shapes_BP <- c(23L, 21L, 21L, 21L, 21L, 21L, 21L, 21L)
   x <- x + scale_color_manual(values=colours_BP)
   #x <- x + scale_x_continuous(breaks = c(0.5, 1, 1.5, 2, 2.5, 3, 5))
@@ -4014,3 +4016,121 @@ myforestplot_5 <- function(df, log_T = TRUE, xlab, limits)
   x <- x + ggplot2::scale_shape_manual(values = shapes_BP)
   print(x)
 }
+
+###
+
+for (exp_name in names(exposure_list2)) {
+  # Convert exposure
+  exposure_dat <- format_data(
+    exposure_list2[[exp_name]],
+    type = "exposure",
+    snp_col = "rsid",
+    beta_col = "beta",
+    se_col = "standard_error",
+    pval_col = "pval",
+    eaf_col = "effect_allele_frequency",
+    effect_allele_col = "effect_allele",
+    other_allele_col = "other_allele"
+  )
+  exposure_dat$phenotype <- exp_name
+  # Loop outcome
+  for (outcome_name in names(outcome_list_stu)) {
+    outcome_data_raw <- outcome_list_stu[[outcome_name]]
+    outcome_data_raw <- as.data.frame(outcome_data_raw)
+    for (study_name in unique(outcome_data_raw$study)) {
+      outcome_study_specific <- outcome_data_raw[outcome_data_raw$study == study_name,]
+    # Convert outcome
+    outcome_dat <- format_data(
+      outcome_study_specific,
+      type = "outcome",
+      snp_col = "SNP",
+      beta_col = "beta",
+      se_col = "se",
+      pval_col = "pval",
+      eaf_col = "eaf",
+      effect_allele_col = "effect_allele",
+      other_allele_col = "other_allele"
+    )
+    outcome_study_name <- paste(outcome_name,"_",study_name)
+    outcome_dat$phenotype <- outcome_study_name
+    outcome_dat <- generate_outdat_with_proxies(exposure_dat = exposure_dat, outcome_dat = outcome_dat, outcome_name = outcome_name,proxies = All_proxy_SNPs)
+    # harmonise
+    harmonised <- harmonise_data(exposure_dat, outcome_dat)
+    harmonised$exposure <- exp_name
+    harmonised$outcome <- outcome_name
+    harmonised_list_stu[[paste0(exp_name, "_", outcome_name)]] <- harmonised
+    if (nrow(harmonised) == 0) next
+    # MR
+    mr_result <- mr(harmonised)
+    mr_result$exposure <- exp_name
+    mr_result$outcome <- outcome_name
+    all_results_stu[[paste0(exp_name, "_", outcome_name)]] <- mr_result
+  }
+  }
+}  
+
+####
+
+for (exp_name in names(exposure_list2)) {
+  
+  # Convert exposure
+  exposure_dat <- format_data(
+    exposure_list2[[exp_name]],
+    type = "exposure",
+    snp_col = "rsid",
+    beta_col = "beta",
+    se_col = "standard_error",
+    pval_col = "pval",
+    eaf_col = "effect_allele_frequency",
+    effect_allele_col = "effect_allele",
+    other_allele_col = "other_allele"
+  )
+  exposure_dat$phenotype <- exp_name
+  
+  # Loop outcome
+  for (outcome_name in names(outcome_list_stu)) {
+    
+    outcome_data_raw <- outcome_list_stu[[outcome_name]]
+    
+    outcome_data_raw <- as.data.frame(outcome_data_raw)
+    
+    for (study_name in unique(outcome_data_raw$study)) {
+      
+      outcome_study_specific <- outcome_data_raw[outcome_data_raw$study == study_name,]
+      
+      # Convert outcome
+      outcome_dat <- format_data(
+        outcome_study_specific,
+        type = "outcome",
+        snp_col = "SNP",
+        beta_col = "beta",
+        se_col = "se",
+        pval_col = "pval",
+        eaf_col = "eaf",
+        effect_allele_col = "effect_allele",
+        other_allele_col = "other_allele"
+      )
+      
+      outcome_dat$phenotype <- outcome_name
+      
+      outcome_dat <- generate_outdat_with_proxies(exposure_dat = exposure_dat, outcome_dat = outcome_dat, outcome_name = outcome_name,proxies = All_proxy_SNPs)
+      
+      # harmonise
+      harmonised <- harmonise_data(exposure_dat, outcome_dat)
+      harmonised$exposure <- exp_name
+      harmonised$outcome <- outcome_name
+      harmonised_list_stu[[paste0(exp_name, "_", outcome_name,"_",study_name)]] <- harmonised
+      
+      if (nrow(harmonised) == 0) next
+      
+      # MR 
+      mr_result <- mr(harmonised)
+      mr_result$exposure <- exp_name
+      mr_result$outcome <- outcome_name
+      mr_result$study <- study_name
+      
+      all_results_stu[[paste0(exp_name, "_", outcome_name,"_",study_name)]] <- mr_result
+    }
+  }
+}
+
