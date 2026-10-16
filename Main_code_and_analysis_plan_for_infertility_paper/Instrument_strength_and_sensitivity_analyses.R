@@ -110,6 +110,8 @@ all_results_mat_donut_trios2[[paste0(exp_name, "_", outcome_name)]] <- mr_result
 
 #Converting list of MR results into data frame
 mr_summary_donut_trios2 <- dplyr::bind_rows(all_results_mat_donut_trios2)
+#Exporting MR results for use in preparing file for figures
+write.csv(mr_summary_donut_trios2, "mr_summary_results_donut_trios_EUR_2025_proxies_mall_updated.csv")
 
 
 
