@@ -77,6 +77,31 @@ all_mr_summary3 <- dplyr::bind_rows(all_results3)
 #Converting list of harmonised SNPs into data frame
 harmonised_df3 <- bind_rows(harmonised_list3, .id = "harmonised_id")
 
+#Summarising outcome participant numbers of Table 1
+n_out4 <- harmonised_df3 %>%
+group_by(outcome) %>%
+summarise(
+Ncase_min = min(ncase.outcome),
+Ncontrol_min = min(ncontrol.outcome),
+N_min = min(samplesize.outcome),
+Ncase_median = median(ncase.outcome),
+Ncontrol_median = median(ncontrol.outcome),
+N_median = median(samplesize.outcome),
+Ncase_max = max(ncase.outcome),
+Ncontrol_max = max(ncontrol.outcome),
+N_max = max(samplesize.outcome)
+) %>%
+ungroup %>%
+merge(., out_info, by.x = "outcome", by.y = "Variable_name") %>%
+arrange(priority, group, order)
+
+n_out4$N_median_min_max <- paste0(n_out4$N_median," (",n_out4$N_min,"-",n_out4$N_max,")")
+n_out4$Ncontrol_median_min_max <- paste0(n_out4$Ncontrol_median," (",n_out4$Ncontrol_min,"-",n_out4$Ncontrol_max,")")
+n_out4$Ncase_median_min_max <- paste0(n_out4$Ncase_median," (",n_out4$Ncase_min,"-",n_out4$Ncase_max,")")
+
+#Outcome participants results were manually copied into word table
+n_out4
+
 #Exporting harmonised SNPs for Supplementary Table
 write.csv(harmonised_df3, "harmonised_results_EUR_2025_proxies_mall_updated.csv", row.names = FALSE)
 
