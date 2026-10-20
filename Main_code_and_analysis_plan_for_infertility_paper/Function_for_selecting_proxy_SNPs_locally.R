@@ -14,7 +14,7 @@ setwd(projectdir)
 getwd()
 
 #This function locally generates outcome data including proxy SNPS, if available (rather than relying on TwoSampleMR).
-#This function was developed primarily by a different researcher to the lead authour, with minor changes being made to make it easier to use in a forloop
+#This function was developed primarily by Gemma Clayton, with minor changes being made to make it easier to use in a forloop
 
 #Loading required packages
 library(tidyr)
